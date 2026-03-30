@@ -134,7 +134,6 @@ local espConfig = {
     showDistance = true,
     maxDistance = 750,
     espToggleKey = Enum.KeyCode.E,
-    guiToggleKey = Enum.KeyCode.RightControl
 }
 
 local espObjects = {}
@@ -324,6 +323,7 @@ local function enableFlight()
         humanoid.AutoRotate = true
         if flyOriginalGravity then workspace.Gravity = flyOriginalGravity end
         flyConfig.active = false
+        print("[FLY] Выключен")
     else
         flyOriginalGravity = workspace.Gravity
         workspace.Gravity = 0
@@ -344,6 +344,7 @@ local function enableFlight()
         humanoid.AutoRotate = false
         humanoid.PlatformStand = true
         flyConfig.active = true
+        print("[FLY] Включен, скорость: " .. flyConfig.speed)
     end
 end
 
@@ -385,7 +386,7 @@ local function updateFlight()
 end
 
 -- ============================================
--- HITBOX СКРИПТ
+-- HITBOX СКРИПТ (ИСПРАВЛЕННЫЙ)
 -- ============================================
 local hitboxConfig = {
     enabled = false,
@@ -397,11 +398,12 @@ local hitboxConfig = {
 
 local hitboxObjects = {}
 local hitboxDebounce = {}
+local hitboxTrackedPlayers = {}
 
 local function isWeaponHit(hit)
     if not hit then return false end
     local name = hit.Name:lower()
-    local words = {"bullet", "projectile", "ray", "shot", "pellet", "ammo", "shell"}
+    local words = {"bullet", "projectile", "ray", "shot", "pellet", "ammo", "shell", "tool", "weapon"}
     for _, w in ipairs(words) do
         if name:find(w) then return true end
     end
@@ -413,13 +415,23 @@ local function isWeaponHit(hit)
     return false
 end
 
-local function createHitbox(p)
-    if p == LocalPlayer or hitboxObjects[p] then return end
-    local char = p.Character
-    if not char then return end
+local function updateHitboxVisuals()
+    for _, data in pairs(hitboxObjects) do
+        if data.box then
+            data.box.Color = hitboxConfig.color
+            data.box.Transparency = hitboxConfig.transparency
+            data.box.Size = Vector3.new(hitboxConfig.size, hitboxConfig.size, hitboxConfig.size)
+        end
+    end
+end
+
+local function createHitbox(player)
+    if player == LocalPlayer or hitboxObjects[player] then return false end
+    local char = player.Character
+    if not char then return false end
     local root = char:FindFirstChild("HumanoidRootPart")
     local hum = char:FindFirstChild("Humanoid")
-    if not root or not hum or hum.Health <= 0 then return end
+    if not root or not hum or hum.Health <= 0 then return false end
     
     local box = Instance.new("Part")
     box.Size = Vector3.new(hitboxConfig.size, hitboxConfig.size, hitboxConfig.size)
@@ -440,42 +452,74 @@ local function createHitbox(p)
     weld.C0 = CFrame.new(0, 1.5, 0)
     weld.Parent = box
     
-    box.Touched:Connect(function(hit)
+    local touchConnection
+    touchConnection = box.Touched:Connect(function(hit)
         if not hitboxConfig.enabled then return end
-        if hit:FindFirstAncestorOfClass("Model") == char then return end
+        if not hit or not hit.Parent then return end
+        local hitChar = hit:FindFirstAncestorOfClass("Model")
+        if hitChar == char then return end
         if not isWeaponHit(hit) then return end
+        
         local now = tick()
-        if hitboxDebounce[p] and now - hitboxDebounce[p] < 0.15 then return end
-        local targetHum = p.Character and p.Character:FindFirstChild("Humanoid")
+        if hitboxDebounce[player] and now - hitboxDebounce[player] < 0.15 then return end
+        
+        local targetHum = player.Character and player.Character:FindFirstChild("Humanoid")
         if targetHum and targetHum.Health > 0 then
-            hitboxDebounce[p] = now
+            hitboxDebounce[player] = now
             targetHum:TakeDamage(20)
         end
     end)
     
-    hitboxObjects[p] = { box = box }
+    hitboxObjects[player] = { 
+        box = box, 
+        weld = weld, 
+        touchConnection = touchConnection,
+        player = player
+    }
+    
+    return true
 end
 
-local function removeHitbox(p)
-    local d = hitboxObjects[p]
-    if d and d.box then d.box:Destroy() end
-    hitboxObjects[p] = nil
+local function removeHitbox(player)
+    local data = hitboxObjects[player]
+    if data then
+        if data.touchConnection then data.touchConnection:Disconnect() end
+        if data.box then data.box:Destroy() end
+        hitboxObjects[player] = nil
+    end
+end
+
+local function refreshAllHitboxes()
+    for p, _ in pairs(hitboxObjects) do removeHitbox(p) end
+    if hitboxConfig.enabled then
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer then
+                local char = p.Character
+                local hum = char and char:FindFirstChild("Humanoid")
+                if hum and hum.Health > 0 then
+                    createHitbox(p)
+                end
+            end
+        end
+    end
 end
 
 local function toggleHitboxSystem()
     hitboxConfig.enabled = not hitboxConfig.enabled
     if hitboxConfig.enabled then
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer then createHitbox(p) end
-        end
+        refreshAllHitboxes()
+        print("[HITBOX] Включен, размер: " .. hitboxConfig.size)
     else
         for p, _ in pairs(hitboxObjects) do removeHitbox(p) end
+        print("[HITBOX] Выключен")
     end
 end
 
 -- Отслеживание для хитбоксов
 local function trackHitboxPlayer(player)
     if player == LocalPlayer then return end
+    if hitboxTrackedPlayers[player] then return end
+    hitboxTrackedPlayers[player] = true
     
     local function onCharacterAdded(character)
         task.wait(0.8)
@@ -532,6 +576,7 @@ local function enableNoclip()
         part.CanCollide = false
     end
     noclipConfig.enabled = true
+    print("[NO CLIP] Включен")
 end
 
 local function disableNoclip()
@@ -543,6 +588,7 @@ local function disableNoclip()
     end
     noclipConfig.originalCollisions = {}
     noclipConfig.enabled = false
+    print("[NO CLIP] Выключен")
 end
 
 local function toggleNoclip()
@@ -602,7 +648,36 @@ end)
 -- ============================================
 RunService.RenderStepped:Connect(updateFlight)
 
--- Отслеживание новых игроков
+-- Обновление расстояния для ESP
+RunService.Heartbeat:Connect(function()
+    if not espConfig.enabled then return end
+    if not camera then return end
+    
+    for _, data in pairs(espObjects) do
+        if data.billboard and data.character and data.character:FindFirstChild("HumanoidRootPart") then
+            local distance = (camera.CFrame.Position - data.character.HumanoidRootPart.Position).Magnitude
+            if data.distanceLabel and espConfig.showDistance then
+                if distance <= espConfig.maxDistance then
+                    data.distanceLabel.Text = string.format("%.0fm", distance)
+                    if distance < 50 then
+                        data.distanceLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+                    elseif distance < 100 then
+                        data.distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+                    else
+                        data.distanceLabel.TextColor3 = Color3.fromRGB(255, 100, 0)
+                    end
+                    data.distanceLabel.Visible = true
+                else
+                    data.distanceLabel.Visible = false
+                end
+            end
+        end
+    end
+end)
+
+-- ============================================
+-- ИНИЦИАЛИЗАЦИЯ
+-- ============================================
 for _, p in ipairs(Players:GetPlayers()) do
     if p ~= LocalPlayer then
         trackPlayer(p)
@@ -814,6 +889,11 @@ local function createSlider(name, minVal, maxVal, getter, setter, format)
         valueLabel.Text = format and format(val) or string.format("%.2f", val)
         label.Text = name .. ": " .. (format and format(val) or string.format("%.2f", val))
         setter(val)
+        if name == "SIZE" and getter == hitboxConfig.size then
+            updateHitboxVisuals()
+        elseif name == "ALPHA" and getter == hitboxConfig.transparency then
+            updateHitboxVisuals()
+        end
     end
     
     sliderBg.InputBegan:Connect(function(i)
@@ -994,49 +1074,43 @@ local EspMenu = createMenu("👁 ESP SETTINGS", Color3.fromRGB(0, 255, 100), 280
 })
 
 local FlyMenu = createMenu("✈ FLY SETTINGS", Color3.fromRGB(0, 200, 255), 260, 180, {
-    createSlider("SPEED", 10, 500, function() return flyConfig.speed end, function(v) flyConfig.speed = v end, function(v) return tostring(v) end),
+    createSlider("SPEED", 10, 500, function() return flyConfig.speed end, function(v) flyConfig.speed = v; if flyConfig.active then print("[FLY] Скорость изменена на: " .. v) end end, function(v) return tostring(v) end),
     createKeybind("FLY KEY", function() return flyConfig.bind end, function(v) flyConfig.bind = v end, Color3.fromRGB(0, 200, 255))
 })
 
-local HitboxMenu = createMenu("⬚ HITBOX SETTINGS", Color3.fromRGB(255, 80, 80), 280, 350, {
+local HitboxMenu = createMenu("⬚ HITBOX SETTINGS", Color3.fromRGB(255, 80, 80), 280, 400, {
     createCheckbox("HITBOX ENABLED", function() return hitboxConfig.enabled end, function(v) 
         hitboxConfig.enabled = v
         if v then
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= LocalPlayer then createHitbox(p) end
-            end
+            refreshAllHitboxes()
+            print("[HITBOX] Включен")
         else
             for p, _ in pairs(hitboxObjects) do removeHitbox(p) end
+            print("[HITBOX] Выключен")
         end
     end),
     createSlider("SIZE", 2, 30, function() return hitboxConfig.size end, function(v) 
         hitboxConfig.size = v
-        if hitboxConfig.enabled then
-            for _, d in pairs(hitboxObjects) do
-                if d.box then d.box.Size = Vector3.new(v, v, v) end
-            end
-        end
+        updateHitboxVisuals()
+        if hitboxConfig.enabled then print("[HITBOX] Размер: " .. v) end
     end, function(v) return tostring(v) end),
     createSlider("ALPHA", 0, 1, function() return hitboxConfig.transparency end, function(v) 
         hitboxConfig.transparency = v
-        if hitboxConfig.enabled then
-            for _, d in pairs(hitboxObjects) do
-                if d.box then d.box.Transparency = v end
-            end
-        end
+        updateHitboxVisuals()
+        if hitboxConfig.enabled then print("[HITBOX] Прозрачность: " .. string.format("%.0f%%", v*100)) end
     end, function(v) return string.format("%.0f%%", v*100) end),
     createColorPicker("COLOR", function() return hitboxConfig.color end, function(v) 
         hitboxConfig.color = v
-        if hitboxConfig.enabled then
-            for _, d in pairs(hitboxObjects) do
-                if d.box then d.box.Color = v end
-            end
+        updateHitboxVisuals()
+        if hitboxConfig.enabled then 
+            local r, g, b = v.R*255, v.G*255, v.B*255
+            print("[HITBOX] Цвет: RGB(" .. math.floor(r) .. ", " .. math.floor(g) .. ", " .. math.floor(b) .. ")")
         end
-    end, function() end),
+    end, updateHitboxVisuals),
     createKeybind("HITBOX KEY", function() return hitboxConfig.bind end, function(v) hitboxConfig.bind = v end, Color3.fromRGB(255, 80, 80))
 })
 
-local NoclipMenu = createMenu("⬚ NO CLIP", Color3.fromRGB(200, 150, 50), 240, 130, {
+local NoclipMenu = createMenu("⬚ NO CLIP", Color3.fromRGB(200, 150, 50), 240, 140, {
     createCheckbox("NO CLIP", function() return noclipConfig.enabled end, function(v) if v then enableNoclip() else disableNoclip() end end),
     createKeybind("NO CLIP KEY", function() return noclipConfig.bind end, function(v) noclipConfig.bind = v end, Color3.fromRGB(200, 150, 50))
 })
@@ -1066,7 +1140,7 @@ print("  SCRIPT HUB LOADED")
 print("════════════════════════════════════════")
 print("  БИНДЫ:")
 print("    ESP: E")
-print("    FLY: F")
+print("    FLY: F (вкл/выкл)")
 print("    HITBOX: H")
 print("    NO CLIP: N")
 print("════════════════════════════════════════")
