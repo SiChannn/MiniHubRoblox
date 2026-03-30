@@ -1,4 +1,4 @@
--- MAIN SCRIPT HUB
+-- MAIN SCRIPT HUB v3.0
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -265,7 +265,6 @@ local function toggleESP(state)
     end
 end
 
--- Отслеживание новых игроков и респавна
 local function trackPlayer(player)
     if player == LocalPlayer then return end
     if espTrackedPlayers[player] then return end
@@ -386,7 +385,7 @@ local function updateFlight()
 end
 
 -- ============================================
--- HITBOX СКРИПТ (ИСПРАВЛЕННЫЙ)
+-- HITBOX СКРИПТ
 -- ============================================
 local hitboxConfig = {
     enabled = false,
@@ -452,8 +451,7 @@ local function createHitbox(player)
     weld.C0 = CFrame.new(0, 1.5, 0)
     weld.Parent = box
     
-    local touchConnection
-    touchConnection = box.Touched:Connect(function(hit)
+    box.Touched:Connect(function(hit)
         if not hitboxConfig.enabled then return end
         if not hit or not hit.Parent then return end
         local hitChar = hit:FindFirstAncestorOfClass("Model")
@@ -470,20 +468,13 @@ local function createHitbox(player)
         end
     end)
     
-    hitboxObjects[player] = { 
-        box = box, 
-        weld = weld, 
-        touchConnection = touchConnection,
-        player = player
-    }
-    
+    hitboxObjects[player] = { box = box, player = player }
     return true
 end
 
 local function removeHitbox(player)
     local data = hitboxObjects[player]
     if data then
-        if data.touchConnection then data.touchConnection:Disconnect() end
         if data.box then data.box:Destroy() end
         hitboxObjects[player] = nil
     end
@@ -508,14 +499,13 @@ local function toggleHitboxSystem()
     hitboxConfig.enabled = not hitboxConfig.enabled
     if hitboxConfig.enabled then
         refreshAllHitboxes()
-        print("[HITBOX] Включен, размер: " .. hitboxConfig.size)
+        print("[HITBOX] Включен")
     else
         for p, _ in pairs(hitboxObjects) do removeHitbox(p) end
         print("[HITBOX] Выключен")
     end
 end
 
--- Отслеживание для хитбоксов
 local function trackHitboxPlayer(player)
     if player == LocalPlayer then return end
     if hitboxTrackedPlayers[player] then return end
@@ -599,7 +589,6 @@ local function toggleNoclip()
     end
 end
 
--- Восстановление ноклипа после смерти
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     if noclipConfig.enabled then
@@ -608,7 +597,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     end
 end)
 
--- Защита от сброса
 RunService.Stepped:Connect(function()
     if noclipConfig.enabled and LocalPlayer.Character then
         local parts = getCharacterParts(LocalPlayer.Character)
@@ -648,7 +636,6 @@ end)
 -- ============================================
 RunService.RenderStepped:Connect(updateFlight)
 
--- Обновление расстояния для ESP
 RunService.Heartbeat:Connect(function()
     if not espConfig.enabled then return end
     if not camera then return end
@@ -889,11 +876,8 @@ local function createSlider(name, minVal, maxVal, getter, setter, format)
         valueLabel.Text = format and format(val) or string.format("%.2f", val)
         label.Text = name .. ": " .. (format and format(val) or string.format("%.2f", val))
         setter(val)
-        if name == "SIZE" and getter == hitboxConfig.size then
-            updateHitboxVisuals()
-        elseif name == "ALPHA" and getter == hitboxConfig.transparency then
-            updateHitboxVisuals()
-        end
+        if name == "SIZE" then updateHitboxVisuals() end
+        if name == "ALPHA" then updateHitboxVisuals() end
     end
     
     sliderBg.InputBegan:Connect(function(i)
@@ -916,7 +900,7 @@ local function createSlider(name, minVal, maxVal, getter, setter, format)
     return frame
 end
 
-local function createColorPicker(name, getter, setter, updateCallback)
+local function createColorPicker(name, getter, setter)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, -16, 0, 40)
     frame.BackgroundTransparency = 1
@@ -988,7 +972,8 @@ local function createColorPicker(name, getter, setter, updateCallback)
             setter(color)
             colorDisplay.BackgroundColor3 = color
             pickerFrame.Visible = false
-            if updateCallback then updateCallback() end
+            updateHitboxVisuals()
+            updateESPColors()
         end)
         
         col = col + 1
@@ -1066,47 +1051,26 @@ end
 local EspMenu = createMenu("👁 ESP SETTINGS", Color3.fromRGB(0, 255, 100), 280, 380, {
     createCheckbox("ESP ENABLED", function() return espConfig.enabled end, function(v) toggleESP(v) end),
     createSlider("ALPHA", 0, 1, function() return espConfig.fillTransparency end, function(v) espConfig.fillTransparency = v; updateESPColors() end, function(v) return string.format("%.0f%%", v*100) end),
-    createColorPicker("OUTLINE COLOR", function() return espConfig.outlineColor end, function(v) espConfig.outlineColor = v; updateESPColors() end, updateESPColors),
-    createColorPicker("FILL COLOR", function() return espConfig.fillColor end, function(v) espConfig.fillColor = v; updateESPColors() end, updateESPColors),
+    createColorPicker("OUTLINE COLOR", function() return espConfig.outlineColor end, function(v) espConfig.outlineColor = v; updateESPColors() end),
+    createColorPicker("FILL COLOR", function() return espConfig.fillColor end, function(v) espConfig.fillColor = v; updateESPColors() end),
     createCheckbox("SHOW NAMES", function() return espConfig.showName end, function(v) espConfig.showName = v; for _, d in pairs(espObjects) do if d.nameLabel then d.nameLabel.Visible = v end end end),
     createCheckbox("SHOW DISTANCE", function() return espConfig.showDistance end, function(v) espConfig.showDistance = v; for _, d in pairs(espObjects) do if d.distanceLabel then d.distanceLabel.Visible = v end end end),
     createKeybind("ESP KEY", function() return espConfig.espToggleKey end, function(v) espConfig.espToggleKey = v end, Color3.fromRGB(0, 255, 100))
 })
 
 local FlyMenu = createMenu("✈ FLY SETTINGS", Color3.fromRGB(0, 200, 255), 260, 180, {
-    createSlider("SPEED", 10, 500, function() return flyConfig.speed end, function(v) flyConfig.speed = v; if flyConfig.active then print("[FLY] Скорость изменена на: " .. v) end end, function(v) return tostring(v) end),
+    createSlider("SPEED", 10, 500, function() return flyConfig.speed end, function(v) flyConfig.speed = v; if flyConfig.active then print("[FLY] Скорость: " .. v) end end, function(v) return tostring(v) end),
     createKeybind("FLY KEY", function() return flyConfig.bind end, function(v) flyConfig.bind = v end, Color3.fromRGB(0, 200, 255))
 })
 
 local HitboxMenu = createMenu("⬚ HITBOX SETTINGS", Color3.fromRGB(255, 80, 80), 280, 400, {
     createCheckbox("HITBOX ENABLED", function() return hitboxConfig.enabled end, function(v) 
         hitboxConfig.enabled = v
-        if v then
-            refreshAllHitboxes()
-            print("[HITBOX] Включен")
-        else
-            for p, _ in pairs(hitboxObjects) do removeHitbox(p) end
-            print("[HITBOX] Выключен")
-        end
+        if v then refreshAllHitboxes() else for p, _ in pairs(hitboxObjects) do removeHitbox(p) end end
     end),
-    createSlider("SIZE", 2, 30, function() return hitboxConfig.size end, function(v) 
-        hitboxConfig.size = v
-        updateHitboxVisuals()
-        if hitboxConfig.enabled then print("[HITBOX] Размер: " .. v) end
-    end, function(v) return tostring(v) end),
-    createSlider("ALPHA", 0, 1, function() return hitboxConfig.transparency end, function(v) 
-        hitboxConfig.transparency = v
-        updateHitboxVisuals()
-        if hitboxConfig.enabled then print("[HITBOX] Прозрачность: " .. string.format("%.0f%%", v*100)) end
-    end, function(v) return string.format("%.0f%%", v*100) end),
-    createColorPicker("COLOR", function() return hitboxConfig.color end, function(v) 
-        hitboxConfig.color = v
-        updateHitboxVisuals()
-        if hitboxConfig.enabled then 
-            local r, g, b = v.R*255, v.G*255, v.B*255
-            print("[HITBOX] Цвет: RGB(" .. math.floor(r) .. ", " .. math.floor(g) .. ", " .. math.floor(b) .. ")")
-        end
-    end, updateHitboxVisuals),
+    createSlider("SIZE", 2, 30, function() return hitboxConfig.size end, function(v) hitboxConfig.size = v; updateHitboxVisuals() end, function(v) return tostring(v) end),
+    createSlider("ALPHA", 0, 1, function() return hitboxConfig.transparency end, function(v) hitboxConfig.transparency = v; updateHitboxVisuals() end, function(v) return string.format("%.0f%%", v*100) end),
+    createColorPicker("COLOR", function() return hitboxConfig.color end, function(v) hitboxConfig.color = v; updateHitboxVisuals() end),
     createKeybind("HITBOX KEY", function() return hitboxConfig.bind end, function(v) hitboxConfig.bind = v end, Color3.fromRGB(255, 80, 80))
 })
 
@@ -1136,11 +1100,11 @@ for i, btn in ipairs(Buttons) do
 end
 
 print("════════════════════════════════════════")
-print("  SCRIPT HUB LOADED")
+print("  SCRIPT HUB v3.0 LOADED")
 print("════════════════════════════════════════")
 print("  БИНДЫ:")
 print("    ESP: E")
-print("    FLY: F (вкл/выкл)")
+print("    FLY: F")
 print("    HITBOX: H")
 print("    NO CLIP: N")
 print("════════════════════════════════════════")
